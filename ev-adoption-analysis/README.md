@@ -1,3 +1,6 @@
+
+Academic project — ISYE 6414: Regression Analysis
+
 ## Step A — Data Cleaning  
 **Notebook:** `Thao_Data_Cleaning_Final.ipynb`
 

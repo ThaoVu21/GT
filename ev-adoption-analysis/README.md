@@ -4,7 +4,7 @@
 ### Instructions
 
 1. Place the required input files in the **same folder** as the notebook:
-   - `alt_fuel_sations-all.csv`  (unzip first)
+   - `alt_fuel_sations-all.csv.zip`
    - `FINAL_ev_prevalence.csv`  
 
 2. In Jupyter:

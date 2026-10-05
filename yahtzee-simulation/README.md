@@ -1,4 +1,4 @@
-# Yahtzee Strategy Simulation Project
+Academic project — ISYE 6644: Simulation
 
 ## Project Overview
 This project implements a Monte Carlo simulation to evaluate six different Yahtzee playing strategies and compare their performance through statistical analysis. The codebase has been improved with shared helper functions, static scoring methods, full Joker rule implementation, and enhanced expected value calculations.

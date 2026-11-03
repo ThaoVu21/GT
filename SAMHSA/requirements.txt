@@ -1,0 +1,6 @@
+# Dashboard runtime (what Render installs). The pipeline additionally needs requirements-pipeline.txt.
+dash==3.4.0
+plotly==6.3.0
+pandas==2.3.3
+numpy==2.3.5
+gunicorn==26.2.0

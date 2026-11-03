@@ -1,0 +1,12 @@
+# Raw data and course documents stay local (too large / not ours to publish)
+*.csv
+!outputs/profile_explorer/*.csv
+*.parquet
+*.pdf
+*.docx
+*.xlsx
+~$*
+.claude/
+__pycache__/
+.venv/
+.DS_Store

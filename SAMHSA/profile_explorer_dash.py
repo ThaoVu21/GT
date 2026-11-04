@@ -371,11 +371,10 @@ def graph(id_, figure=None):
     return dcc.Graph(id=id_, figure=figure, config={"displaylogo": False})
 
 
-def tab_intro(question, audience, caution):
-    """Top-of-tab banner: the research question, who it serves, and its main limitation."""
+def tab_intro(question, audience):
+    """Top-of-tab banner: the research question and who it serves."""
     return html.Div([html.Div([html.B("Question: "), question]),
-                     html.Div([html.B("Who it helps: "), audience], style={"marginTop": "4px"}),
-                     html.Div([html.B("Keep in mind: "), caution], style={"marginTop": "4px", "color": MUTED})],
+                     html.Div([html.B("Who it helps: "), audience], style={"marginTop": "4px"})],
                     style={**CARD, "margin": "12px 0 0", "fontSize": "14px"})
 
 
@@ -411,8 +410,7 @@ def layout():
     tab_profiles = html.Div([
         tab_intro("Who is being served? Seven client profiles replace one national average with groups that can be "
                   "planned for.",
-                  "State mental-health agencies, community providers, program administrators and researchers.",
-                  "Profiles are statistical groups, not clinical diagnoses or proof of service need."),
+                  "State mental-health agencies, community providers, program administrators and researchers."),
         html.Div(profiles_takeaway(), style=TAKEAWAY),
 
         section("How big is each profile, and how often does it use inpatient care?"),
@@ -468,9 +466,7 @@ def layout():
 
     tab_heatmap = html.Div([
         tab_intro("Where is inpatient use higher or lower than expected, and for which client group?",
-                  "State administrators, federal researchers and policymakers.",
-                  "O/E is not a quality-of-care ranking. Differences can reflect access, service systems or "
-                  "reporting, not only care practices."),
+                  "State administrators, federal researchers and policymakers."),
         html.Div(heatmap_takeaway(), style=TAKEAWAY),
         section("Observed ÷ expected inpatient use, by state and profile"),
         about("The relative view: for each state and profile, how many inpatient clients there were compared with "
@@ -491,9 +487,7 @@ def layout():
 
     tab_compare = html.Div([
         tab_intro("Which client groups account for the differences between states?",
-                  "State administrators, clinical program planners and policymakers.",
-                  "This tab shows absolute contributions (O − E, in clients). A small group can have a high O/E in "
-                  "tab ② but contribute little to the total."),
+                  "State administrators, clinical program planners and policymakers."),
         section("Which profile drives each state?"),
         html.Div(network_takeaway(), style=TAKEAWAY),
         about("Groups every state with the profile behind the largest part of its observed − expected gap, so "
@@ -527,11 +521,20 @@ def layout():
 
     return html.Div([
         html.H1("Client-Profile Explorer", style={"margin": "0 0 4px"}),
-        html.P("2024 SAMHSA MH-CLD · RQ1 client profiles (clustering) · RQ4 profile-level state comparisons (O/E). "
-               "O/E = observed inpatient clients ÷ expected under a model of client characteristics that excludes "
-               "state; O/E > 1 means more reported inpatient use than expected. SMI = serious mental "
-               "illness (adults); SED = serious emotional disturbance (children); SUD = substance use disorder.",
-               style=CAPTION),
+        html.P("2024 SAMHSA Mental Health Client-Level Data (MH-CLD) · RQ1 client profiles (clustering) · RQ4 "
+               "profile-level state comparisons.", style=CAPTION),
+        html.Div("Abbreviations", style={**LABEL, "marginTop": "8px"}),
+        html.Div([
+            html.Div([html.B(k), f" = {v}"]) for k, v in [
+                ("RQ", "research question"), ("P1–P7", "client profiles 1–7"),
+                ("O", "observed inpatient clients"),
+                ("E", "expected inpatient clients, from a model of client characteristics that excludes state"),
+                ("O/E", "observed ÷ expected (above 1 = more than expected; not a measure of care quality)"),
+                ("O − E", "observed minus expected, in clients"),
+                ("SMI", "serious mental illness (adults)"), ("SED", "serious emotional disturbance (children)"),
+                ("SUD", "substance use disorder"), ("†", "reporting caveat for that state")]],
+            style={"display": "grid", "gridTemplateColumns": "repeat(auto-fill, minmax(280px, 1fr))",
+                   "gap": "2px 16px", "fontSize": "12px", "color": MUTED}),
         kpis,
         html.Div([html.Div("States to compare (or click a state in the heatmap or network)", style=LABEL),
                   dcc.Dropdown(id="pe-states", options=STATE_LIST, value=DEFAULT_STATES, multi=True)], style=CARD),

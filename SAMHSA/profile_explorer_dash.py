@@ -16,10 +16,11 @@ Views (one takeaway line on top of each)
                        its size and inpatient rate.                                  (RQ1)
   2. State x profile - heatmap of profile-specific O/E. Click a row to add/remove
                        that state in the comparison.                                 (RQ4)
-  3. Compare states  - which profiles drive state differences overall, a network of
-                       states grouped by their main-driver profile, then for the
-                       selected states: profile mix, excess by profile and the
+  3. Compare states  - network of states grouped by their main-driver profile, then
+                       for the selected states: profile mix, O − E by profile and the
                        mix vs. within-profile split of the raw-rate gap.             (RQ4)
+Each tab opens with its question, audience and main limitation, and each chart has a
+short Purpose / How it helps in practice / How to use it panel.
 """
 from pathlib import Path
 
@@ -117,12 +118,12 @@ def compare_takeaways(states):
     out = []
     for s in states:
         row, st = g.loc[s], STT.set_index("state").loc[s]
-        driver = SP[SP.state == s].sort_values("excess", key=abs, ascending=False).iloc[0]
+        bigger = "profile mix" if abs(row.mix_effect) > abs(row.within_effect) else "within-profile rates"
         note = reporting_note(s)
         out.append(html.Li([
-            html.B(s), f": raw rate {st.rate:.1%} ({pts(st.rate - NAT_RATE)} vs. national). "
-            f"Profile mix {pts(row.mix_effect)}, within-profile rates {pts(row.within_effect)}. "
-            f"Biggest driver: {SHORT[driver.profile]} ({driver.excess:+,.0f} inpatients vs. expected)."
+            html.B(s), f": raw inpatient rate {st.rate:.1%} ({pts(st.rate - NAT_RATE)} vs. national) = "
+            f"profile mix {pts(row.mix_effect)} + within-profile rates {pts(row.within_effect)}. "
+            f"Most of the gap comes from {bigger}."
             + (f" Reporting caveat: {note}." if note else "")]))
     return out
 
@@ -226,40 +227,11 @@ def fig_heatmap(states):
     return style(fig, 18 * len(order) + 120)
 
 
-def overall_drivers():
-    """Each profile's share of all state-level |O − E|, split into more- and fewer-than-expected."""
+def national_gap_share():
+    """Each profile's share of all state-level |O − E| (states with enough clients)."""
     d = SP[SP.STATEFIP.isin(STT[STT.n >= MIN_STATE_N].STATEFIP)]
-    more = d[d.excess > 0].groupby("profile").excess.sum().reindex(PROFILES, fill_value=0)
-    fewer = -d[d.excess < 0].groupby("profile").excess.sum().reindex(PROFILES, fill_value=0)
-    return more, fewer, (more + fewer) / (more + fewer).sum()
-
-
-def drivers_takeaway():
-    _, _, share = overall_drivers()
-    top = share.sort_values(ascending=False)
-    return (f"Across all states, {SHORT[top.index[0]]} ({top.index[0].split(' · ', 1)[1]}) accounts for "
-            f"{top.iloc[0]:.0%} of all gaps between observed and expected inpatients (above or below), followed by "
-            + ", ".join(f"{SHORT[p]} {v:.0%}" for p, v in top.iloc[1:].items()) + ".")
-
-
-def fig_overall_drivers():
-    more, fewer, share = overall_drivers()
-    ys = PROFILES[::-1]
-    fig = go.Figure([
-        go.Bar(y=ys, x=more[ys], name="More than expected", orientation="h", marker_color="#b8302f",
-               hovertemplate="<b>%{y}</b><br>Above expected: +%{x:,.0f} inpatients, summed over states"
-                             "<extra></extra>"),
-        go.Bar(y=ys, x=fewer[ys], name="Fewer than expected", orientation="h", marker_color="#1c5cab",
-               text=[f"{share[p]:.0%} of all gaps" for p in ys], textposition="outside", textfont_color=INK,
-               customdata=[share[p] for p in ys],
-               hovertemplate="<b>%{y}</b><br>Below expected: −%{x:,.0f} inpatients, summed over states"
-                             "<br>Share of all gaps: %{customdata:.0%}<extra></extra>"),
-    ])
-    fig.update_traces(marker_line_color=SURFACE, marker_line_width=2)
-    fig.update_layout(barmode="stack", title="Inpatients above/below expected, summed over all states",
-                      xaxis=dict(title="", tickformat=",", range=[0, (more + fewer).max() * 1.25]),
-                      legend=dict(orientation="h", y=-0.2))
-    return style(fig, 300)
+    gaps = d.excess.abs().groupby(d.profile).sum().reindex(PROFILES, fill_value=0)
+    return gaps / gaps.sum()
 
 
 def network_links():
@@ -273,10 +245,11 @@ def network_links():
 
 def network_takeaway():
     main = network_links().query("rank == 1")
-    counts = main.profile.value_counts()
-    return (f"{SHORT[counts.index[0]]} is the main driver in {counts.iloc[0]} of {len(main)} states, "
-            f"followed by " + ", ".join(f"{SHORT[p]} ({c})" for p, c in counts.iloc[1:].items())
-            + ". States in the same colour group differ from expectation mainly through the same kind of client.")
+    counts, share = main.profile.value_counts(), national_gap_share()
+    top = counts.index[0]
+    return (f"{SHORT[top]} ({top.split(' · ', 1)[1]}) is the main driver in {counts.iloc[0]} of {len(main)} states "
+            f"and accounts for {share[top]:.0%} of all observed − expected gaps nationally. Next: "
+            + ", ".join(f"{SHORT[p]} ({c} states)" for p, c in counts.iloc[1:].items()) + ".")
 
 
 def fig_network(states):
@@ -311,7 +284,7 @@ def fig_network(states):
                     traces.append(go.Scatter(x=xs, y=ys, mode="lines", hoverinfo="skip", showlegend=False,
                                              opacity=opacity, line=dict(color=COLOR_OF[p], width=width, dash=dash)))
 
-    stt = STT.set_index("state")
+    stt, gap = STT.set_index("state"), national_gap_share()
     second = links[links["rank"] == 2].set_index("state")
     size_of = lambda n: 12 + 22 * np.sqrt(n / STT.n.max())
     for p in PROFILES:
@@ -334,7 +307,8 @@ def fig_network(states):
         showlegend=False, text=[f"<b>{SHORT[p]}</b>" for p in PROFILES], textposition="middle center",
         textfont=dict(size=13, color="#ffffff"), hoverinfo="text",
         hovertext=[f"<b>{p}</b><br>Clients: {r.n:,}<br>Inpatient rate: {r.rate:.1%}"
-                   f"<br>Main driver in {(main.profile == p).sum()} states" for p, r in zip(PROFILES, PROF.itertuples())],
+                   f"<br>Main driver in {(main.profile == p).sum()} states<br>Share of all gaps nationally: {gap[p]:.0%}"
+                   for p, r in zip(PROFILES, PROF.itertuples())],
         marker=dict(color=[COLOR_OF[p] for p in PROFILES], size=46, line=dict(color=SURFACE, width=3))))
     fig = go.Figure(traces)
     fig.update_xaxes(visible=False)
@@ -397,6 +371,29 @@ def graph(id_, figure=None):
     return dcc.Graph(id=id_, figure=figure, config={"displaylogo": False})
 
 
+def tab_intro(question, audience, caution):
+    """Top-of-tab banner: the research question, who it serves, and its main limitation."""
+    return html.Div([html.Div([html.B("Question: "), question]),
+                     html.Div([html.B("Who it helps: "), audience], style={"marginTop": "4px"}),
+                     html.Div([html.B("Keep in mind: "), caution], style={"marginTop": "4px", "color": MUTED})],
+                    style={**CARD, "margin": "12px 0 0", "fontSize": "14px"})
+
+
+def about(purpose, use, how):
+    """Three short notes under a chart heading: what it is for, a real-world use, how to read/interact."""
+    def cell(label, body):
+        return html.Div([html.Div(label, style=LABEL), html.Div(body)],
+                        style={"flex": "1", "minWidth": "240px"})
+    return html.Div([cell("Purpose", purpose), cell("How it helps in practice", use), cell("How to use it", how)],
+                    style={"display": "flex", "gap": "16px", "flexWrap": "wrap", "fontSize": "13px",
+                           "color": INK, "background": PAGE, "border": f"1px solid {GRID}", "borderRadius": "6px",
+                           "padding": "10px 12px", "margin": "6px 0 8px"})
+
+
+def section(title):
+    return html.H3(title, style={"margin": "20px 0 4px"})
+
+
 def layout():
     kpis = html.Div([
         kpi("Clients", f"{PROF.n.sum():,}"), kpi("Client profiles", str(len(PROFILES))),
@@ -409,35 +406,54 @@ def layout():
         "min_cluster_share": "Smallest profile", "chosen": "Chosen"})
     sel_rec, sel_cols = records(sel_view, {"Silhouette": "{:.3f}", "Stability (ARI)": "{:.2f}",
                                            "Smallest profile": "{:.1%}"})
+    row = {"display": "flex", "gap": "12px", "flexWrap": "wrap"}
+    col = {"flex": "1", "minWidth": "320px"}
     tab_profiles = html.Div([
+        tab_intro("Who is being served? Seven client profiles replace one national average with groups that can be "
+                  "planned for.",
+                  "State mental-health agencies, community providers, program administrators and researchers.",
+                  "Profiles are statistical groups, not clinical diagnoses or proof of service need."),
         html.Div(profiles_takeaway(), style=TAKEAWAY),
-        html.Div([html.Div(graph("pe-share", fig_profile_bar("share")), style={"flex": "3", "minWidth": "320px"}),
-                  html.Div(graph("pe-rate", fig_profile_bar("rate")), style={"flex": "2", "minWidth": "320px"})],
-                 style={"display": "flex", "gap": "12px", "flexWrap": "wrap"}),
-        html.H3("What each profile looks like", style={"margin": "16px 0 4px"}),
-        html.P("Numbers are the % of the profile with that trait. Red = more common than nationally, "
-               "blue = less common.", style=CAPTION),
+
+        section("How big is each profile, and how often does it use inpatient care?"),
+        about("Shows the size of each profile (left) and its inpatient rate compared with the national rate (right).",
+              "Shows whether a small group accounts for a large share of inpatient use, so agencies can prioritise "
+              "reviewing crisis, discharge follow-up and case-management capacity for that group.",
+              "Bars to the right of the dotted line are above the national rate. Hover a bar for client and "
+              "inpatient counts."),
+        html.Div([html.Div(graph("pe-share", fig_profile_bar("share")), style={**col, "flex": "3"}),
+                  html.Div(graph("pe-rate", fig_profile_bar("rate")), style={**col, "flex": "2"})], style=row),
+
+        section("What does each profile look like?"),
+        about("Describes who is in each profile: the clinical traits and age used to build it (left) and other "
+              "demographics that only describe it (right).",
+              "Program planners can match services to a group, such as integrated mental-health and substance-use "
+              "care for adults with SMI and SUD. Equity researchers can check whether some groups are "
+              "over-represented in high-use profiles.",
+              "Read one column top to bottom. The number is the % of the profile with that trait; red = more "
+              "common than nationally, blue = less common. Hover for the national % and data coverage."),
         html.Div([
             html.Div([html.B("Clinical traits and age (used to build the profiles)"),
-                      graph("pe-chars", fig_characteristics(True))], style={"flex": "1", "minWidth": "320px"}),
+                      graph("pe-chars", fig_characteristics(True))], style=col),
             html.Div([html.B("Other demographics (describe the profiles, not used to build them)"),
                       graph("pe-demo", fig_characteristics(False)),
                       html.P("Percentages are among clients with a known value. Share of all clients with a known "
                              "value: " + ", ".join(
                                  f"{PRETTY[g]} {v:.0%}" for g, v in
                                  FEATS[~FEATS.in_clustering].groupby("group", sort=False)
-                                 .national_known_pct.first().items()) + ".", style=CAPTION)],
-                     style={"flex": "1", "minWidth": "320px"}),
-        ], style={"display": "flex", "gap": "12px", "flexWrap": "wrap"}),
+                                 .national_known_pct.first().items()) + ".", style=CAPTION)], style=col),
+        ], style=row),
         html.Details([
-            html.Summary("How the profiles were built"),
+            html.Summary("How the profiles were built (for analysts and reviewers)"),
+            html.P("Lets reviewers judge how stable the profiles are and whether any of them is a reporting artifact "
+                   "rather than a real client group.", style=CAPTION),
             html.P("Features: age band, SMI/SED status, number of diagnoses, SUD and 13 diagnosis flags (one-hot, "
                    "missing kept as its own level). Sex and other demographics are shown as descriptors rather than "
-                   "clustering features, so the profiles reflect clinical differences. K-Means (10 restarts) is fit on a 500k sample. To pick k (4–10), "
-                   "it is fit on 4 independent 200k samples scored on a common 100k holdout; stability = mean "
-                   "pairwise ARI. Rule: ARI ≥ 0.8 and smallest profile ≥ 2%, then best silhouette. Silhouette "
-                   "scores are low (~0.15), so the profiles overlap: they are useful summaries, not natural "
-                   "categories.", style=CAPTION),
+                   "clustering features, so the profiles reflect clinical differences. K-Means (10 restarts) is fit "
+                   "on a 500k sample, then every client is assigned. To pick k (4–10), it is fit on 4 independent "
+                   "200k samples scored on a common 100k holdout; stability = mean pairwise ARI. Rule: ARI ≥ 0.8 and "
+                   "smallest profile ≥ 2%, then best silhouette. Silhouette scores are low (~0.15), so the profiles "
+                   "overlap: they are useful summaries, not natural categories.", style=CAPTION),
             dash_table.DataTable(data=sel_rec, columns=sel_cols, **TABLE_STYLE),
             html.P(f"Reporting-artifact audit: NMI between profile and state = {SEL.nmi_with_state.max():.2f} "
                    "(0 = profiles are not state proxies). Largest single-state concentration: "
@@ -447,57 +463,77 @@ def layout():
                    + ". A profile is treated as a possible reporting artifact only if it is concentrated in one "
                      "state (lift > 3) and defined by a missing value; no profile meets both conditions.",
                    style=CAPTION),
-        ], style={"marginTop": "8px"}),
+        ], style={"marginTop": "12px"}),
     ])
 
     tab_heatmap = html.Div([
+        tab_intro("Where is inpatient use higher or lower than expected, and for which client group?",
+                  "State administrators, federal researchers and policymakers.",
+                  "O/E is not a quality-of-care ranking. Differences can reflect access, service systems or "
+                  "reporting, not only care practices."),
         html.Div(heatmap_takeaway(), style=TAKEAWAY),
+        section("Observed ÷ expected inpatient use, by state and profile"),
+        about("The relative view: for each state and profile, how many inpatient clients there were compared with "
+              "what the clients' characteristics predict.",
+              "A state with an average overall O/E can still hospitalise one group far more than expected. "
+              "Administrators can focus a review on that group's services instead of every program, and "
+              "find states where the same group sits near 1 to learn from.",
+              ["Rows are sorted by overall O/E (the All column). Red = more than expected, blue = fewer. Hover a "
+               "cell for counts, a 95% interval and O − E. Blank = too few clients to report. † = check reporting "
+               "first. ", html.B("Click a row"), " to compare that state in tab ③."]),
         graph("pe-heatmap"),
-        html.P(["Red = more inpatient clients than expected for that profile, blue = fewer. States sorted by "
-                f"overall O/E (the All column); states with < {MIN_STATE_N:,} clients are left out and cells with "
-                f"fewer than {MIN_N} clients or {MIN_E} expected inpatients are suppressed (blank, and the hover "
-                "shows only the number of clients). Hover intervals are 95% and adjusted for overdispersion between states, "
-                "so they are much wider than a plain Poisson interval. † = reporting caveat: the state reports only "
-                "one inpatient setting, has a near-zero inpatient rate, or is missing SMI/SED or primary diagnosis for over "
-                "30% of clients; read "
-                "its O/E as a reporting difference first. ", html.B("Click a row"),
-                " to add or remove that state in tab ③. "] +
+        html.P([f"Left out: states with < {MIN_STATE_N:,} clients. Blank cells have fewer than {MIN_N} clients or "
+                f"{MIN_E} expected inpatients. Intervals are adjusted for overdispersion between states, so they are "
+                "much wider than a plain Poisson interval. † = the state reports only one inpatient setting, has a "
+                "near-zero inpatient rate, or is missing SMI/SED or primary diagnosis for over 30% of clients. "] +
                [f"{SHORT[p]} = {p.split(' · ', 1)[1]}.  " for p in PROFILES], style=CAPTION),
     ])
 
     tab_compare = html.Div([
-        html.H3("Across all states", style={"margin": "16px 0 4px"}),
-        html.Div(drivers_takeaway(), style=TAKEAWAY),
-        graph("pe-overall", fig_overall_drivers()),
-        html.H3("Which profile drives each state?", style={"margin": "16px 0 4px"}),
+        tab_intro("Which client groups account for the differences between states?",
+                  "State administrators, clinical program planners and policymakers.",
+                  "This tab shows absolute contributions (O − E, in clients). A small group can have a high O/E in "
+                  "tab ② but contribute little to the total."),
+        section("Which profile drives each state?"),
         html.Div(network_takeaway(), style=TAKEAWAY),
+        about("Groups every state with the profile behind the largest part of its observed − expected gap, so "
+              "states that differ for the same reason sit together.",
+              "National program staff can bring together states with the same driver for joint technical "
+              "assistance or peer learning, and each state sees which client group to look at first.",
+              ["Big circles = profiles; dots = states (size = clients). Thick line = main driver, thin = second; "
+               "solid = more than expected, dotted = fewer. Click a legend item to hide a group. ",
+               html.B("Click a state"), " to add it to the comparison below."]),
         graph("pe-network"),
-        html.P(["Each state sits next to the profile behind the largest share of its gap between observed and "
-                "expected inpatients (thick line) and is also linked to its second-largest (thin line). Solid line "
-                "= more inpatients than expected, dotted = fewer. Colour = the state's main-driver profile; dot "
-                f"size = number of clients. States with < {MIN_STATE_N:,} clients and suppressed cells are left "
-                "out. ", html.B("Click a state"), " to add or remove it in the comparison below."], style=CAPTION),
-        html.H3("Selected states", style={"margin": "16px 0 4px"}),
+        html.P(f"States with < {MIN_STATE_N:,} clients and suppressed cells are left out.", style=CAPTION),
+
+        section("Compare selected states"),
+        html.P("Pick states in the box at the top of the page, or click them in the heatmap or the network.",
+               style=CAPTION),
         html.Ul(id="pe-takeaways", style={**TAKEAWAY, "paddingLeft": "28px"}),
-        html.Div([html.Div(graph("pe-mix"), style={"flex": "1", "minWidth": "320px"}), html.Div(graph("pe-drivers"), style={"flex": "1", "minWidth": "320px"})],
-                 style={"display": "flex", "gap": "12px", "flexWrap": "wrap"}),
-        html.P("Bars above 0: the profile has more inpatient clients than its client characteristics predict "
-               "(O − E, risk-adjusted). The mix/within split is different: it decomposes the raw-rate gap, before "
-               "adjustment. "
-               "Profile mix = the state serves more/fewer clients of high-use profiles; within-profile = the same "
-               "profile is hospitalised more/less often there (the two add up to the raw-rate gap). A profile with no "
-               "clients in a state counts entirely as a mix effect.", style=CAPTION),
+        html.Div([
+            html.Div([about("Shows each state's mix of client profiles next to the national mix.",
+                            "Supports fair benchmarking: a state serving more high-use clients should be expected "
+                            "to have a higher raw rate. The summary above splits the raw-rate gap into profile mix "
+                            "and within-profile rates (descriptive, not causal).",
+                            "Compare each state's segments with the National bar. Hover a segment for its share."),
+                      graph("pe-mix")], style=col),
+            html.Div([about("The absolute view: inpatient clients above (+) or below (−) expected, per profile.",
+                            "Shows where the volume is, so administrators can prioritise the profiles with the "
+                            "largest bars rather than those with the highest ratio.",
+                            "Bars above 0 = more than expected. Hover for observed, expected and O/E."),
+                      graph("pe-drivers")], style=col),
+        ], style=row),
     ])
 
     return html.Div([
         html.H1("Client-Profile Explorer", style={"margin": "0 0 4px"}),
         html.P("2024 SAMHSA MH-CLD · RQ1 client profiles (clustering) · RQ4 profile-level state comparisons (O/E). "
                "O/E = observed inpatient clients ÷ expected under a model of client characteristics that excludes "
-               "state; O/E > 1 means more reported inpatient use than expected, not worse care. SMI = serious mental "
+               "state; O/E > 1 means more reported inpatient use than expected. SMI = serious mental "
                "illness (adults); SED = serious emotional disturbance (children); SUD = substance use disorder.",
                style=CAPTION),
         kpis,
-        html.Div([html.Div("States to compare (or click the heatmap)", style=LABEL),
+        html.Div([html.Div("States to compare (or click a state in the heatmap or network)", style=LABEL),
                   dcc.Dropdown(id="pe-states", options=STATE_LIST, value=DEFAULT_STATES, multi=True)], style=CARD),
         dcc.Tabs(id="pe-view", value="profiles", style={"marginTop": "12px"}, children=[
             dcc.Tab(label="① Who are the clients?", value="profiles", children=tab_profiles),
